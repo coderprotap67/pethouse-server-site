@@ -1,13 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken'); 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config({ path: '.env' });
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Middleware
 app.use(cors({
   origin: [process.env.FRONTEND_URL || 'http://localhost:3000'],
   credentials: true
@@ -20,7 +20,6 @@ const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-// JWT Verification Middleware
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
@@ -34,51 +33,109 @@ const verifyToken = (req, res, next) => {
 
 async function run() {
   try {
-    // image_9ffb4b.png matching Database & Collection
     const database = client.db('pethouse');
     const petsCollection = database.collection('data');
     const requestsCollection = database.collection('requests');
+    const usersCollection = database.collection('users'); 
 
-    // Auth APIs
+    app.post('/api/register', async (req, res) => {
+      try {
+        const { name, email, password } = req.body;
+        
+        const existingUser = await usersCollection.findOne({ email });
+        if (existingUser) {
+          return res.status(400).send({ success: false, message: 'User already exists!' });
+        }
+
+        const newUser = { name, email, password };
+        const result = await usersCollection.insertOne(newUser);
+        res.send({ success: true, message: 'User registered successfully!', result });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    app.post('/api/login', async (req, res) => {
+      try {
+        const { email, password } = req.body;
+        
+        const user = await usersCollection.findOne({ email });
+        
+        if (!user || user.password !== password) {
+          return res.status(401).send({ success: false, message: 'Invalid credentials' });
+        }
+
+        const token = jwt.sign(
+          { name: user.name, email: user.email }, 
+          process.env.JWT_SECRET, 
+          { expiresIn: '1d' }
+        );
+
+        res.cookie('token', token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+        }).send({ success: true, user: { name: user.name, email: user.email } });
+
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
     app.post('/api/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
       res.cookie('token', token, {
         httpOnly: true,
-        secure: true,
-        sameSite: 'none'
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
       }).send({ success: true });
     });
 
     app.post('/api/logout', async (req, res) => {
-      res.clearCookie('token', { maxAge: 0, secure: true, sameSite: 'none' }).send({ success: true });
+      res.clearCookie('token', { 
+        maxAge: 0, 
+        secure: process.env.NODE_ENV === 'production', 
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' 
+      }).send({ success: true });
     });
 
-    // Get Logged-in User Info (Handles Route Reload issues)
     app.get('/api/user-me', verifyToken, async (req, res) => {
       res.send({ user: req.user });
     });
 
-    // Pets - Advanced Search, Filter ($regex, $in)
     app.get('/api/pets', async (req, res) => {
-      const { search, species } = req.query;
-      let query = {};
+      try {
+        const { search, species } = req.query;
+        let query = {};
 
-      if (search) {
-        query.name = { $regex: search, $options: 'i' };
-      }
-      if (species && species !== 'all') {
-        query.species = { $in: [species] };
-      }
+        if (search) {
+          query.name = { $regex: search, $options: 'i' };
+        }
+                if (species && species !== 'all') {
+          query.species = { $regex: `^${species}$`, $options: 'i' };
+        }
 
-      const result = await petsCollection.find(query).toArray();
-      res.send(result);
+        const result = await petsCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
     });
 
     app.get('/api/pets/:id', async (req, res) => {
-      const id = req.params.id;
-      const result = await petsCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
+      try {
+        const id = req.params.id;
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: 'Invalid ID format' });
+        }
+        const result = await petsCollection.findOne({ _id: new ObjectId(id) });
+        if (!result) {
+          return res.status(404).send({ message: 'Pet not found' });
+        }
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
     });
 
     app.post('/api/pets', verifyToken, async (req, res) => {
@@ -101,7 +158,6 @@ async function run() {
       res.send(result);
     });
 
-    // Adoption Requests Handling
     app.post('/api/requests', verifyToken, async (req, res) => {
       const requestData = req.body;
       const result = await requestsCollection.insertOne(requestData);
@@ -137,7 +193,6 @@ async function run() {
       const { status, petId } = req.body;
 
       if (status === 'approved') {
-        // Mark the pet as adopted and reject all other requests for this pet
         await petsCollection.updateOne({ _id: new ObjectId(petId) }, { $set: { status: 'adopted' } });
         await requestsCollection.updateMany({ petId, _id: { $ne: new ObjectId(id) } }, { $set: { status: 'rejected' } });
       }
