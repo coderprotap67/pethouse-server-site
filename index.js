@@ -64,13 +64,11 @@ async function run() {
         if (!user || user.password !== password) {
           return res.status(401).send({ success: false, message: 'Invalid credentials' });
         }
-
         const token = jwt.sign(
           { name: user.name, email: user.email }, 
           process.env.JWT_SECRET, 
           { expiresIn: '1d' }
         );
-
         res.cookie('token', token, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
