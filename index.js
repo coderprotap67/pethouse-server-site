@@ -137,13 +137,11 @@ async function run() {
         res.status(500).send({ message: error.message });
       }
     });
-
     app.post('/api/pets', verifyToken, async (req, res) => {
       const newPet = req.body;
       const result = await petsCollection.insertOne(newPet);
       res.send(result);
     });
-
     app.put('/api/pets/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
@@ -151,43 +149,36 @@ async function run() {
       const result = await petsCollection.updateOne(filter, updatedPet);
       res.send(result);
     });
-
     app.delete('/api/pets/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await petsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
-
     app.post('/api/requests', verifyToken, async (req, res) => {
       const requestData = req.body;
       const result = await requestsCollection.insertOne(requestData);
       res.send(result);
     });
-
     app.get('/api/my-requests', verifyToken, async (req, res) => {
       const email = req.query.email;
       const result = await requestsCollection.find({ requesterEmail: email }).toArray();
       res.send(result);
     });
-
     app.delete('/api/requests/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await requestsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
-
     app.get('/api/owner-listings', verifyToken, async (req, res) => {
       const email = req.query.email;
       const result = await petsCollection.find({ ownerEmail: email }).toArray();
       res.send(result);
     });
-
     app.get('/api/pet-requests/:petId', verifyToken, async (req, res) => {
       const petId = req.params.petId;
       const result = await requestsCollection.find({ petId }).toArray();
       res.send(result);
     });
-
     app.patch('/api/requests-status/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const { status, petId } = req.body;
@@ -200,13 +191,11 @@ async function run() {
       const result = await requestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status } });
       res.send(result);
     });
-
     console.log("Successfully connected to MongoDB!");
   } catch (error) {
     console.error(error);
   }
 }
 run().catch(console.dir);
-
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 app.listen(port, () => console.log(`Server listening on port ${port}`));
