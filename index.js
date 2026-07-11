@@ -7,9 +7,9 @@ require('dotenv').config({ path: '.env' });
 
 const app = express();
 const port = process.env.PORT || 5000;
-
+app.set('trust proxy', 1);
 app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'http://localhost:3000'],
+  origin: [process.env.FRONTEND_URL],
   credentials: true
 }));
 app.use(express.json());
@@ -30,23 +30,24 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
-
 async function run() {
   try {
     const database = client.db('pethouse');
     const petsCollection = database.collection('data');
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
-
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
         
+        if (!email || !password) {
+          return res.status(400).send({ success: false, message: 'Email and password are required!' });
+        }
+
         const existingUser = await usersCollection.findOne({ email });
         if (existingUser) {
           return res.status(400).send({ success: false, message: 'User already exists!' });
         }
-
         const newUser = { name, email, password };
         const result = await usersCollection.insertOne(newUser);
         res.send({ success: true, message: 'User registered successfully!', result });
@@ -57,13 +58,13 @@ async function run() {
 
     app.post('/api/login', async (req, res) => {
       try {
-        const { email, password } = req.body;
-        
+        const { email, password } = req.body;   
+        console.log("Attempting login for:", email);
         const user = await usersCollection.findOne({ email });
-        
-        if (!user || user.password !== password) {
+                if (!user || user.password?.trim() !== password?.trim()) {
           return res.status(401).send({ success: false, message: 'Invalid credentials' });
         }
+
         const token = jwt.sign(
           { name: user.name, email: user.email }, 
           process.env.JWT_SECRET, 
@@ -71,8 +72,9 @@ async function run() {
         );
         res.cookie('token', token, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+          secure: true, 
+          sameSite: 'none',
+          maxAge: 24 * 60 * 60 * 1000 
         }).send({ success: true, user: { name: user.name, email: user.email } });
 
       } catch (error) {
@@ -84,16 +86,16 @@ async function run() {
       const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
       res.cookie('token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+        secure: true,
+        sameSite: 'none',
+        maxAge: 24 * 60 * 60 * 1000
       }).send({ success: true });
     });
-
     app.post('/api/logout', async (req, res) => {
       res.clearCookie('token', { 
-        maxAge: 0, 
-        secure: process.env.NODE_ENV === 'production', 
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' 
+        httpOnly: true,
+        secure: true, 
+        sameSite: 'none'
       }).send({ success: true });
     });
 
@@ -109,7 +111,7 @@ async function run() {
         if (search) {
           query.name = { $regex: search, $options: 'i' };
         }
-                if (species && species !== 'all') {
+        if (species && species !== 'all') {
           query.species = { $regex: `^${species}$`, $options: 'i' };
         }
 
