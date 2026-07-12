@@ -30,6 +30,7 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
+
 async function run() {
   try {
     const database = client.db('pethouse');
@@ -55,13 +56,12 @@ async function run() {
         res.status(500).send({ success: false, message: error.message });
       }
     });
-
     app.post('/api/login', async (req, res) => {
       try {
         const { email, password } = req.body;   
         console.log("Attempting login for:", email);
         const user = await usersCollection.findOne({ email });
-                if (!user || user.password?.trim() !== password?.trim()) {
+        if (!user || user.password?.trim() !== password?.trim()) {
           return res.status(401).send({ success: false, message: 'Invalid credentials' });
         }
 
@@ -81,6 +81,47 @@ async function run() {
         res.status(500).send({ success: false, message: error.message });
       }
     });
+    app.post('/api/google-login', async (req, res) => {
+      try {
+        const { name, email, photoURL } = req.body;
+
+        if (!email) {
+          return res.status(400).send({ success: false, message: 'Email is required from Google' });
+        }
+
+        let user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          const newUser = { 
+            name, 
+            email, 
+            photoURL: photoURL || "https://placedog.net/200",
+            role: "user",
+            authProvider: 'google' 
+          };
+          await usersCollection.insertOne(newUser);
+          user = newUser;
+        }
+
+        const token = jwt.sign(
+          { name: user.name, email: user.email }, 
+          process.env.JWT_SECRET, 
+          { expiresIn: '1d' }
+        );
+
+        res.cookie('token', token, {
+          httpOnly: true,
+          secure: true, 
+          sameSite: 'none',
+          maxAge: 24 * 60 * 60 * 1000 
+        }).send({ success: true, user: { name: user.name, email: user.email } });
+
+      } catch (error) {
+        console.error("Google Auth Backend Error:", error);
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
     app.post('/api/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
@@ -91,6 +132,7 @@ async function run() {
         maxAge: 24 * 60 * 60 * 1000
       }).send({ success: true });
     });
+
     app.post('/api/logout', async (req, res) => {
       res.clearCookie('token', { 
         httpOnly: true,
@@ -102,7 +144,6 @@ async function run() {
     app.get('/api/user-me', verifyToken, async (req, res) => {
       res.send({ user: req.user });
     });
-
     app.get('/api/pets', async (req, res) => {
       try {
         const { search, species } = req.query;
@@ -137,11 +178,13 @@ async function run() {
         res.status(500).send({ message: error.message });
       }
     });
+
     app.post('/api/pets', verifyToken, async (req, res) => {
       const newPet = req.body;
       const result = await petsCollection.insertOne(newPet);
       res.send(result);
     });
+
     app.put('/api/pets/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
@@ -149,36 +192,43 @@ async function run() {
       const result = await petsCollection.updateOne(filter, updatedPet);
       res.send(result);
     });
+
     app.delete('/api/pets/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await petsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
+
     app.post('/api/requests', verifyToken, async (req, res) => {
       const requestData = req.body;
       const result = await requestsCollection.insertOne(requestData);
       res.send(result);
     });
+
     app.get('/api/my-requests', verifyToken, async (req, res) => {
       const email = req.query.email;
       const result = await requestsCollection.find({ requesterEmail: email }).toArray();
       res.send(result);
     });
+
     app.delete('/api/requests/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await requestsCollection.deleteOne({ _id: new ObjectId(id) });
       res.send(result);
     });
+
     app.get('/api/owner-listings', verifyToken, async (req, res) => {
       const email = req.query.email;
       const result = await petsCollection.find({ ownerEmail: email }).toArray();
       res.send(result);
     });
+
     app.get('/api/pet-requests/:petId', verifyToken, async (req, res) => {
       const petId = req.params.petId;
       const result = await requestsCollection.find({ petId }).toArray();
       res.send(result);
     });
+
     app.patch('/api/requests-status/:id', verifyToken, async (req, res) => {
       const id = req.params.id;
       const { status, petId } = req.body;
@@ -187,9 +237,43 @@ async function run() {
         await petsCollection.updateOne({ _id: new ObjectId(petId) }, { $set: { status: 'adopted' } });
         await requestsCollection.updateMany({ petId, _id: { $ne: new ObjectId(id) } }, { $set: { status: 'rejected' } });
       }
-
       const result = await requestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status } });
       res.send(result);
+    });
+
+    app.put('/api/update-profile', verifyToken, async (req, res) => {
+      try {
+        const { name, photoURL, currentPassword, newPassword } = req.body;
+        const email = req.user.email; 
+        const user = await usersCollection.findOne({ email });
+        if (!user) {
+          return res.status(404).send({ success: false, message: 'User not found' });
+        }
+        let updatedData = { name, photoURL };
+        if (currentPassword && newPassword) {
+          if (user.authProvider === 'google') {
+            return res.status(400).send({ success: false, message: 'Google users cannot change password here.' });
+          }
+          if (user.password?.trim() !== currentPassword?.trim()) {
+            return res.status(400).send({ success: false, message: 'Current password is incorrect.' });
+          }
+          if (newPassword.length < 6) {
+            return res.status(400).send({ success: false, message: 'New password must be at least 6 characters.' });
+          }
+          updatedData.password = newPassword; 
+        }
+        await usersCollection.updateOne(
+          { email },
+          { $set: updatedData }
+        );
+        const updatedUser = await usersCollection.findOne({ email }); 
+        res.send({ 
+          success: true, 
+          user: { name: updatedUser.name, email: updatedUser.email, photoURL: updatedUser.photoURL } 
+        });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
     });
     console.log("Successfully connected to MongoDB!");
   } catch (error) {
