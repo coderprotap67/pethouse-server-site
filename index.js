@@ -3,9 +3,6 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken'); 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const { betterAuth } = require("better-auth");
-const { mongodbAdapter } = require("better-auth/adapters/mongodb");
-const { toNodeHandler } = require("better-auth/node");
 require('dotenv').config({ path: '.env' });
 
 const app = express();
@@ -48,6 +45,7 @@ async function run() {
         },
       },
     });
+    
     app.all("/api/auth/*", toNodeHandler(auth));
 
     app.use(express.json());
