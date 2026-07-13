@@ -13,7 +13,6 @@ app.use(cors({
   origin: [process.env.FRONTEND_URL],
   credentials: true
 }));
-
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
@@ -22,7 +21,6 @@ const client = new MongoClient(uri, {
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
-  
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return res.status(403).send({ message: 'Forbidden access' });
     req.user = decoded;
@@ -43,7 +41,6 @@ async function run() {
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
     const { toNodeHandler } = await import("better-auth/node");
-
     const auth = betterAuth({
       database: mongodbAdapter(client.db('pethouse')), 
       socialProviders: {
@@ -52,6 +49,9 @@ async function run() {
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         },
       },
+      advanced: {
+        basePath: "/api/auth"
+      }
     });
     
     app.all("/api/auth/*", toNodeHandler(auth));
@@ -96,6 +96,7 @@ async function run() {
         res.status(500).send({ success: false, message: error.message });
       }
     });
+
     app.post('/api/google-login', async (req, res) => {
       try {
         const { name, email, photoURL } = req.body;
