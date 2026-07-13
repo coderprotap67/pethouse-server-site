@@ -36,6 +36,14 @@ async function run() {
     const petsCollection = database.collection('data');
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
+
+    app.use(express.json());
+    app.use(cookieParser());
+
+    const { betterAuth } = await import("better-auth");
+    const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
+    const { toNodeHandler } = await import("better-auth/node");
+
     const auth = betterAuth({
       database: mongodbAdapter(client.db('pethouse')), 
       socialProviders: {
@@ -47,10 +55,6 @@ async function run() {
     });
     
     app.all("/api/auth/*", toNodeHandler(auth));
-
-    app.use(express.json());
-    app.use(cookieParser());
-
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
@@ -68,7 +72,7 @@ async function run() {
         res.status(500).send({ success: false, message: error.message });
       }
     });
-
+    
     app.post('/api/login', async (req, res) => {
       try {
         const { email, password } = req.body;   
@@ -232,6 +236,5 @@ async function run() {
   }
 }
 run().catch(console.dir);
-
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 app.listen(port, () => console.log(`Server listening on port ${port}`));
