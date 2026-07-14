@@ -9,10 +9,14 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
+
+// ১. CORS কনফিগারেশন (উভয় এনভায়রনমেন্টের জন্য ডাইনামিক ফ্রন্টএন্ড URL)
+const frontendUrl = process.env.FRONTEND_URL || "https://pet-client-site.vercel.app";
 app.use(cors({
-  origin: [process.env.FRONTEND_URL || "https://pet-client-site.vercel.app"],
+  origin: [frontendUrl, "http://localhost:3000"],
   credentials: true
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -22,6 +26,7 @@ const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
+// টোকেন ভেরিফাই মিডলওয়্যার (আপনার কাস্টম লগইনের জন্য)
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
@@ -32,6 +37,9 @@ const verifyToken = (req, res, next) => {
   });
 };
 
+// ==========================================
+// ২. Better-Auth নোড হ্যান্ডলার ও ডেটাবেজ অ্যাডাপ্টার ফিক্স
+// ==========================================
 let authInstance;
 
 const getAuthInstance = async () => {
@@ -39,12 +47,12 @@ const getAuthInstance = async () => {
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
     
-    if (!client.topology || !client.topology.isConnected()) {
-      await client.connect();
-    }
+    // ✅ ফিক্স ১: পুরানো client.topology বাদ দিয়ে মডার্ন কানেকশন হ্যান্ডলিং
+    await client.connect();
+    const db = client.db('pethouse');
 
     authInstance = betterAuth({
-      database: mongodbAdapter(client.db('pethouse')), 
+      database: mongodbAdapter(db), 
       socialProviders: {
         google: {
           clientId: process.env.GOOGLE_CLIENT_ID,
@@ -55,22 +63,26 @@ const getAuthInstance = async () => {
         "https://pet-client-site.vercel.app", 
         "http://localhost:3000"
       ],
+      // ✅ ফিক্স ৩: সম্পূর্ণ কুকি সেটিংস (httpOnly যুক্ত করা হয়েছে)
       cookies: {
         sessionToken: {
           options: {
             secure: true,
             sameSite: "none",
+            httpOnly: true,
           }
         }
       },
+      // ✅ ফিক্স ২: অকেজো disableCSRFCheck সরিয়ে ফেলা হয়েছে
       advanced: {
-        basePath: "/api/auth",
-        disableCSRFCheck: true 
+        basePath: "/api/auth"
       }
     });
   }
   return authInstance;
 };
+
+// Better-Auth এর রাউট প্রসেসর
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -81,6 +93,8 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
     res.status(500).send({ error: err.message });
   }
 });
+// ==========================================
+
 async function run() {
   try {
     const database = client.db('pethouse');
@@ -88,6 +102,7 @@ async function run() {
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
 
+    // --- এপিআই রাউটসমূহ ---
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
@@ -117,24 +132,7 @@ async function run() {
       }
     });
 
-    app.post('/api/google-login', async (req, res) => {
-      try {
-        const { name, email, photoURL } = req.body;
-        if (!email) return res.status(400).send({ success: false, message: 'Email is required from Google' });
-        let user = await usersCollection.findOne({ email });
-        if (!user) {
-          const newUser = { name, email, photoURL: photoURL || "https://placedog.net/200", role: "user", authProvider: 'google' };
-          await usersCollection.insertOne(newUser);
-          user = newUser;
-        }
-        const token = jwt.sign({ name: user.name, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1d' });
-        res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
-          .send({ success: true, user: { name: user.name, email: user.email } });
-      } catch (error) {
-        res.status(500).send({ success: false, message: error.message });
-      }
-    });
-
+    // কাস্টম টোকেন জেনারেটর
     app.post('/api/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
