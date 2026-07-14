@@ -7,14 +7,11 @@ require('dotenv').config({ path: '.env' });
 
 const app = express();
 const port = process.env.PORT || 5000;
-
 app.set('trust proxy', 1);
-
 app.use(cors({
   origin: [process.env.FRONTEND_URL],
   credentials: true
 }));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -24,29 +21,23 @@ const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-// টোকেন ভেরিফাই মিডলওয়্যার
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
-  
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return res.status(403).send({ message: 'Forbidden access' });
     req.user = decoded;
     next();
   });
 };
+let authInstance;
 
-async function run() {
-  try {
-    const database = client.db('pethouse');
-    const petsCollection = database.collection('data');
-    const requestsCollection = database.collection('requests');
-    const usersCollection = database.collection('users'); 
+const getAuthInstance = async () => {
+  if (!authInstance) {
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-    const { toNodeHandler } = await import("better-auth/node");
-
-    const auth = betterAuth({
+    
+    authInstance = betterAuth({
       database: mongodbAdapter(client.db('pethouse')), 
       socialProviders: {
         google: {
@@ -55,23 +46,30 @@ async function run() {
         },
       },
       advanced: {
-        basePath: "/api/auth" 
+        basePath: "/api/auth"
       }
     });
-        app.all("/api/auth/*", (req, res) => {
-      const authHandler = toNodeHandler(auth);
-      return authHandler(req, res);
-    });
+  }
+  return authInstance;
+};
+
+app.all("/api/auth/*", async (req, res) => {
+  const { toNodeHandler } = await import("better-auth/node");
+  const auth = await getAuthInstance();
+  return toNodeHandler(auth)(req, res);
+});
+async function run() {
+  try {
+    const database = client.db('pethouse');
+    const petsCollection = database.collection('data');
+    const requestsCollection = database.collection('requests');
+    const usersCollection = database.collection('users'); 
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
-        if (!email || !password) {
-          return res.status(400).send({ success: false, message: 'Email and password are required!' });
-        }
+        if (!email || !password) return res.status(400).send({ success: false, message: 'Email and password are required!' });
         const existingUser = await usersCollection.findOne({ email });
-        if (existingUser) {
-          return res.status(400).send({ success: false, message: 'User already exists!' });
-        }
+        if (existingUser) return res.status(400).send({ success: false, message: 'User already exists!' });
         const newUser = { name, email, password };
         const result = await usersCollection.insertOne(newUser);
         res.send({ success: true, message: 'User registered successfully!', result });
@@ -83,22 +81,13 @@ async function run() {
     app.post('/api/login', async (req, res) => {
       try {
         const { email, password } = req.body;   
-        console.log("Attempting login for:", email);
         const user = await usersCollection.findOne({ email });
         if (!user || user.password?.trim() !== password?.trim()) {
           return res.status(401).send({ success: false, message: 'Invalid credentials' });
         }
-        const token = jwt.sign(
-          { name: user.name, email: user.email }, 
-          process.env.JWT_SECRET, 
-          { expiresIn: '1d' }
-        );
-        res.cookie('token', token, {
-          httpOnly: true,
-          secure: true, 
-          sameSite: 'none',
-          maxAge: 24 * 60 * 60 * 1000 
-        }).send({ success: true, user: { name: user.name, email: user.email } });
+        const token = jwt.sign({ name: user.name, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1d' });
+        res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
+          .send({ success: true, user: { name: user.name, email: user.email } });
       } catch (error) {
         res.status(500).send({ success: false, message: error.message });
       }
@@ -110,11 +99,7 @@ async function run() {
         if (!email) return res.status(400).send({ success: false, message: 'Email is required from Google' });
         let user = await usersCollection.findOne({ email });
         if (!user) {
-          const newUser = { 
-            name, email, 
-            photoURL: photoURL || "https://placedog.net/200",
-            role: "user", authProvider: 'google' 
-          };
+          const newUser = { name, email, photoURL: photoURL || "https://placedog.net/200", role: "user", authProvider: 'google' };
           await usersCollection.insertOne(newUser);
           user = newUser;
         }
