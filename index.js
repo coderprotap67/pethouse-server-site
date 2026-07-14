@@ -7,9 +7,12 @@ require('dotenv').config({ path: '.env' });
 
 const app = express();
 const port = process.env.PORT || 5000;
+
 app.set('trust proxy', 1);
+
+// ১. CORS ও বডি পার্সার কনফিগারেশন
 app.use(cors({
-  origin: [process.env.FRONTEND_URL],
+  origin: [process.env.FRONTEND_URL || "https://pet-client-site.vercel.app"],
   credentials: true
 }));
 app.use(express.json());
@@ -21,6 +24,7 @@ const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
+// টোকেন ভেরিফাই মিডলওয়্যার
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
@@ -52,8 +56,7 @@ const getAuthInstance = async () => {
   }
   return authInstance;
 };
-
-app.all("/api/auth/(.*)", async (req, res) => {
+app.all(/^\/api\/auth\/.*/, async (req, res) => {
   const { toNodeHandler } = await import("better-auth/node");
   const auth = await getAuthInstance();
   return toNodeHandler(auth)(req, res);
@@ -64,6 +67,7 @@ async function run() {
     const petsCollection = database.collection('data');
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
+
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
