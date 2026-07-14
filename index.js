@@ -7,20 +7,28 @@ require('dotenv').config({ path: '.env' });
 
 const app = express();
 const port = process.env.PORT || 5000;
+
 app.set('trust proxy', 1);
 
 app.use(cors({
   origin: [process.env.FRONTEND_URL],
   credentials: true
 }));
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
+// টোকেন ভেরিফাই মিডলওয়্যার
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
+  
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return res.status(403).send({ message: 'Forbidden access' });
     req.user = decoded;
@@ -34,13 +42,10 @@ async function run() {
     const petsCollection = database.collection('data');
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
-
-    app.use(express.json());
-    app.use(cookieParser());
-
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
     const { toNodeHandler } = await import("better-auth/node");
+
     const auth = betterAuth({
       database: mongodbAdapter(client.db('pethouse')), 
       socialProviders: {
@@ -50,11 +55,13 @@ async function run() {
         },
       },
       advanced: {
-        basePath: "/api/auth"
+        basePath: "/api/auth" 
       }
     });
-    
-    app.all("/api/auth/*", toNodeHandler(auth));
+        app.all("/api/auth/*", (req, res) => {
+      const authHandler = toNodeHandler(auth);
+      return authHandler(req, res);
+    });
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
@@ -237,5 +244,6 @@ async function run() {
   }
 }
 run().catch(console.dir);
+
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 app.listen(port, () => console.log(`Server listening on port ${port}`));
