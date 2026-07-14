@@ -9,6 +9,8 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
+
+// ১. CORS কনফিগারেশন (ক্রস-ডোমেইন ক্রেডেনশিয়ালস এনাবলড)
 app.use(cors({
   origin: [process.env.FRONTEND_URL || "https://pet-client-site.vercel.app"],
   credentials: true
@@ -16,11 +18,14 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
 const uri = process.env.MONGODB_URI;
+// সার্ভারলেস ফাংশনের জন্য কানেকশন অপ্টিমাইজেশন
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
+// টোকেন ভেরিফাই মিডলওয়্যার
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
@@ -30,13 +35,19 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
+
+// ==========================================
+// ২. Better-Auth নোড হ্যান্ডলার ও টপ-লেভেল ট্রাস্টেড অরিজিনস কনফিগারেশন
+// ==========================================
 let authInstance;
 
 const getAuthInstance = async () => {
   if (!authInstance) {
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-        if (!client.topology || !client.topology.isConnected()) {
+    
+    // মঙ্গোডিবি কানেকশন ওপেন না থাকলে ওপেন করবে
+    if (!client.topology || !client.topology.isConnected()) {
       await client.connect();
     }
 
@@ -48,17 +59,30 @@ const getAuthInstance = async () => {
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         },
       },
+      // ✅ এটি এখন একদম টপ-লেভেলে আছে, ফলে Better-Auth আপনার ফ্রন্টএন্ডকে কোনো মতেই ব্লক করবে না
+      trustedOrigins: [
+        "https://pet-client-site.vercel.app", 
+        "http://localhost:3000"
+      ],
+      // ক্রস-ডোমেইন কুকি শেয়ারিং অন করার জন্য সিকিউরিটি ফ্ল্যাগ
+      cookies: {
+        sessionToken: {
+          options: {
+            secure: true,
+            sameSite: "none",
+            domain: ".vercel.app" // সাবডোমেইনগুলোর মধ্যে কুকি শেয়ার করার জন্য
+          }
+        }
+      },
       advanced: {
-        basePath: "/api/auth",
-        trustedOrigins: [
-          "https://pet-client-site.vercel.app", 
-          "http://localhost:3000"
-        ]
+        basePath: "/api/auth"
       }
     });
   }
   return authInstance;
 };
+
+// এই রাউটটি Better-Auth এর সব রিকোয়েস্ট এক্সপ্রেসের মাধ্যমে প্রসেস করবে
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -69,12 +93,16 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
     res.status(500).send({ error: err.message });
   }
 });
+// ==========================================
+
 async function run() {
   try {
     const database = client.db('pethouse');
     const petsCollection = database.collection('data');
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
+
+    // --- এপিআই রাউটসমূহ ---
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
@@ -240,5 +268,6 @@ async function run() {
   }
 }
 run().catch(console.dir);
+
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 app.listen(port, () => console.log(`Server listening on port ${port}`));
