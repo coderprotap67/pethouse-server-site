@@ -9,8 +9,6 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
-
-// ১. CORS ও বডি পার্সার কনফিগারেশন
 app.use(cors({
   origin: [process.env.FRONTEND_URL || "https://pet-client-site.vercel.app"],
   credentials: true
@@ -18,13 +16,11 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-// টোকেন ভেরিফাই মিডলওয়্যার
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
@@ -34,17 +30,16 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
-
-// ==========================================
-// ২. Better-Auth নোড হ্যান্ডলার ও পিওর রেগুলার এক্সপ্রেশন রাউট
-// ==========================================
 let authInstance;
 
 const getAuthInstance = async () => {
   if (!authInstance) {
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-    
+        if (!client.topology || !client.topology.isConnected()) {
+      await client.connect();
+    }
+
     authInstance = betterAuth({
       database: mongodbAdapter(client.db('pethouse')), 
       socialProviders: {
@@ -55,33 +50,31 @@ const getAuthInstance = async () => {
       },
       advanced: {
         basePath: "/api/auth",
-        // ✅ আপনার ফ্রন্টএন্ড ডোমেইনটি বিশ্বস্ত হিসেবে যুক্ত করা হলো
         trustedOrigins: [
           "https://pet-client-site.vercel.app", 
-          "http://localhost:3000" // লোকাল ডেভেলপমেন্টের সুবিধার জন্য
+          "http://localhost:3000"
         ]
       }
     });
   }
   return authInstance;
 };
-
-// পিওর রেগুলার এক্সপ্রেশন ব্যবহার করা হয়েছে যাতে পাঠ-টু-রেজেক্স লাইব্রেরি ক্র্যাশ না করে
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
-  const { toNodeHandler } = await import("better-auth/node");
-  const auth = await getAuthInstance();
-  return toNodeHandler(auth)(req, res);
+  try {
+    const { toNodeHandler } = await import("better-auth/node");
+    const auth = await getAuthInstance();
+    return toNodeHandler(auth)(req, res);
+  } catch (err) {
+    console.error("Better Auth error: ", err);
+    res.status(500).send({ error: err.message });
+  }
 });
-// ==========================================
-
 async function run() {
   try {
     const database = client.db('pethouse');
     const petsCollection = database.collection('data');
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
-
-    // --- কাস্টম এপিআই রাউটসমূহ ---
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
@@ -247,6 +240,5 @@ async function run() {
   }
 }
 run().catch(console.dir);
-
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 app.listen(port, () => console.log(`Server listening on port ${port}`));
