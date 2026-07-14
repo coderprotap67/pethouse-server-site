@@ -9,8 +9,6 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
-
-// ১. CORS কনফিগারেশন (ক্রস-ডোমেইন ক্রেডেনশিয়ালস এনাবলড)
 app.use(cors({
   origin: [process.env.FRONTEND_URL || "https://pet-client-site.vercel.app"],
   credentials: true
@@ -20,12 +18,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 const uri = process.env.MONGODB_URI;
-// সার্ভারলেস ফাংশনের জন্য কানেকশন অপ্টিমাইজেশন
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-// টোকেন ভেরিফাই মিডলওয়্যার
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
@@ -36,9 +32,6 @@ const verifyToken = (req, res, next) => {
   });
 };
 
-// ==========================================
-// ২. Better-Auth নোড হ্যান্ডলার ও টপ-লেভেল ট্রাস্টেড অরিজিনস কনফিগারেশন
-// ==========================================
 let authInstance;
 
 const getAuthInstance = async () => {
@@ -46,7 +39,6 @@ const getAuthInstance = async () => {
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
     
-    // মঙ্গোডিবি কানেকশন ওপেন না থাকলে ওপেন করবে
     if (!client.topology || !client.topology.isConnected()) {
       await client.connect();
     }
@@ -63,10 +55,7 @@ const getAuthInstance = async () => {
         "https://pet-client-site.vercel.app", 
         "http://localhost:3000"
       ],
-   cookies: {
-        crossSubDomain: {
-          enabled: true,
-        },
+      cookies: {
         sessionToken: {
           options: {
             secure: true,
@@ -75,7 +64,8 @@ const getAuthInstance = async () => {
         }
       },
       advanced: {
-        basePath: "/api/auth"
+        basePath: "/api/auth",
+        disableCSRFCheck: true 
       }
     });
   }
