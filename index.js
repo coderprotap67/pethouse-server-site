@@ -53,7 +53,7 @@ const getAuthInstance = async () => {
   return authInstance;
 };
 
-app.all("/api/auth/*", async (req, res) => {
+app.all("/api/auth/(.*)", async (req, res) => {
   const { toNodeHandler } = await import("better-auth/node");
   const auth = await getAuthInstance();
   return toNodeHandler(auth)(req, res);
