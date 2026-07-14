@@ -34,6 +34,10 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
+
+// ==========================================
+// ২. Better-Auth নোড হ্যান্ডলার ও পিওর রেগুলার এক্সপ্রেশন রাউট
+// ==========================================
 let authInstance;
 
 const getAuthInstance = async () => {
@@ -50,17 +54,26 @@ const getAuthInstance = async () => {
         },
       },
       advanced: {
-        basePath: "/api/auth"
+        basePath: "/api/auth",
+        // ✅ আপনার ফ্রন্টএন্ড ডোমেইনটি বিশ্বস্ত হিসেবে যুক্ত করা হলো
+        trustedOrigins: [
+          "https://pet-client-site.vercel.app", 
+          "http://localhost:3000" // লোকাল ডেভেলপমেন্টের সুবিধার জন্য
+        ]
       }
     });
   }
   return authInstance;
 };
+
+// পিওর রেগুলার এক্সপ্রেশন ব্যবহার করা হয়েছে যাতে পাঠ-টু-রেজেক্স লাইব্রেরি ক্র্যাশ না করে
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   const { toNodeHandler } = await import("better-auth/node");
   const auth = await getAuthInstance();
   return toNodeHandler(auth)(req, res);
 });
+// ==========================================
+
 async function run() {
   try {
     const database = client.db('pethouse');
@@ -68,6 +81,7 @@ async function run() {
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
 
+    // --- কাস্টম এপিআই রাউটসমূহ ---
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
