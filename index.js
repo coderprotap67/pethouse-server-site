@@ -59,18 +59,15 @@ const getAuthInstance = async () => {
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         },
       },
-      // ✅ এটি এখন একদম টপ-লেভেলে আছে, ফলে Better-Auth আপনার ফ্রন্টএন্ডকে কোনো মতেই ব্লক করবে না
       trustedOrigins: [
         "https://pet-client-site.vercel.app", 
         "http://localhost:3000"
       ],
-      // ক্রস-ডোমেইন কুকি শেয়ারিং অন করার জন্য সিকিউরিটি ফ্ল্যাগ
       cookies: {
         sessionToken: {
           options: {
             secure: true,
             sameSite: "none",
-            domain: ".vercel.app" // সাবডোমেইনগুলোর মধ্যে কুকি শেয়ার করার জন্য
           }
         }
       },
@@ -81,8 +78,6 @@ const getAuthInstance = async () => {
   }
   return authInstance;
 };
-
-// এই রাউটটি Better-Auth এর সব রিকোয়েস্ট এক্সপ্রেসের মাধ্যমে প্রসেস করবে
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -93,8 +88,6 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
     res.status(500).send({ error: err.message });
   }
 });
-// ==========================================
-
 async function run() {
   try {
     const database = client.db('pethouse');
@@ -102,7 +95,6 @@ async function run() {
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
 
-    // --- এপিআই রাউটসমূহ ---
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
