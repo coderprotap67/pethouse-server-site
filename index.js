@@ -63,7 +63,10 @@ const getAuthInstance = async () => {
         "https://pet-client-site.vercel.app", 
         "http://localhost:3000"
       ],
-      cookies: {
+   cookies: {
+        crossSubDomain: {
+          enabled: true,
+        },
         sessionToken: {
           options: {
             secure: true,
