@@ -160,18 +160,23 @@ async function run() {
       }
     });
 
-    app.get('/api/pets/:id', async (req, res) => {
+app.get('/api/pets/:id', async (req, res) => {
       try {
         const id = req.params.id;
-        if (!ObjectId.isValid(id)) return res.status(400).send({ message: 'Invalid ID format' });
-        const result = await petsCollection.findOne({ _id: new ObjectId(id) });
+                const query = {
+          $or: [
+            { _id: id },
+            ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])
+          ]
+        };
+
+        const result = await petsCollection.findOne(query);
         if (!result) return res.status(404).send({ message: 'Pet not found' });
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: error.message });
       }
     });
-
     app.post('/api/pets', verifyToken, async (req, res) => {
       const result = await petsCollection.insertOne(req.body);
       res.send(result);
