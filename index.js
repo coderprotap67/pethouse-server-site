@@ -10,7 +10,6 @@ const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
 
-// ১. CORS কনফিগারেশন (উভয় এনভায়রনমেন্টের জন্য ডাইনামিক ফ্রন্টএন্ড URL)
 const frontendUrl = process.env.FRONTEND_URL || "https://pet-client-site.vercel.app";
 app.use(cors({
   origin: [frontendUrl, "http://localhost:3000"],
@@ -26,7 +25,6 @@ const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-// টোকেন ভেরিফাই মিডলওয়্যার (আপনার কাস্টম লগইনের জন্য)
 const verifyToken = (req, res, next) => {
   const token = req.cookies?.token;
   if (!token) return res.status(401).send({ message: 'Unauthorized access' });
@@ -36,18 +34,12 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
-
-// ==========================================
-// ২. Better-Auth নোড হ্যান্ডলার ও ডেটাবেজ অ্যাডাপ্টার ফিক্স
-// ==========================================
 let authInstance;
-
 const getAuthInstance = async () => {
   if (!authInstance) {
     const { betterAuth } = await import("better-auth");
     const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
     
-    // ✅ ফিক্স ১: পুরানো client.topology বাদ দিয়ে মডার্ন কানেকশন হ্যান্ডলিং
     await client.connect();
     const db = client.db('pethouse');
 
@@ -57,13 +49,17 @@ const getAuthInstance = async () => {
         google: {
           clientId: process.env.GOOGLE_CLIENT_ID,
           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          mapQuery(req) {
+            return {
+              prompt: "select_account"
+            };
+          }
         },
       },
       trustedOrigins: [
         "https://pet-client-site.vercel.app", 
         "http://localhost:3000"
       ],
-      // ✅ ফিক্স ৩: সম্পূর্ণ কুকি সেটিংস (httpOnly যুক্ত করা হয়েছে)
       cookies: {
         sessionToken: {
           options: {
@@ -73,7 +69,6 @@ const getAuthInstance = async () => {
           }
         }
       },
-      // ✅ ফিক্স ২: অকেজো disableCSRFCheck সরিয়ে ফেলা হয়েছে
       advanced: {
         basePath: "/api/auth"
       }
@@ -82,7 +77,6 @@ const getAuthInstance = async () => {
   return authInstance;
 };
 
-// Better-Auth এর রাউট প্রসেসর
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -93,7 +87,6 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
     res.status(500).send({ error: err.message });
   }
 });
-// ==========================================
 
 async function run() {
   try {
@@ -102,7 +95,6 @@ async function run() {
     const requestsCollection = database.collection('requests');
     const usersCollection = database.collection('users'); 
 
-    // --- এপিআই রাউটসমূহ ---
     app.post('/api/register', async (req, res) => {
       try {
         const { name, email, password } = req.body;
@@ -132,7 +124,6 @@ async function run() {
       }
     });
 
-    // কাস্টম টোকেন জেনারেটর
     app.post('/api/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
@@ -160,10 +151,10 @@ async function run() {
       }
     });
 
-app.get('/api/pets/:id', async (req, res) => {
+    app.get('/api/pets/:id', async (req, res) => {
       try {
         const id = req.params.id;
-                const query = {
+        const query = {
           $or: [
             { _id: id },
             ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])
@@ -177,6 +168,7 @@ app.get('/api/pets/:id', async (req, res) => {
         res.status(500).send({ message: error.message });
       }
     });
+
     app.post('/api/pets', verifyToken, async (req, res) => {
       const result = await petsCollection.insertOne(req.body);
       res.send(result);
