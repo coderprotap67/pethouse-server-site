@@ -62,14 +62,18 @@ const getAuthInstance = async () => {
         }
       },
       advanced: {
-        basePath: "/api/auth"
+        basePath: "/api/auth",
+        // ⬇️ এই ৩টি প্রক্সি ও ক্রস-ডোমেইন সেশন সেটিংস যোগ করা হয়েছে
+        useSecureCookies: true,
+        crossSubDomainCookie: true,
+        proxyImperativeHeaders: true
       }
     });
   }
   return authInstance;
 };
 
-// ১০০% ফিক্সড ভেরিফিকেশন মিডলওয়্যার (JWT এবং Better Auth সেশন উভয়টি চেক করবে)
+// ১০০% ফিক্সড ভেরিফিকেশন মিডলওয়্যার (JWT এবং Better Auth সেশন উভয়টি চেক করবে)
 const verifyToken = async (req, res, next) => {
   // ১. প্রথমে আপনার নরমাল লগইনের JWT টোকেন চেক করবে
   let token = req.cookies?.token;
@@ -90,7 +94,7 @@ const verifyToken = async (req, res, next) => {
 
     try {
       const auth = await getAuthInstance();
-      // রিকোয়েস্ট হেডার্স ব্যবহার করে সেশন যাচাই
+      // রিকোয়েস্ট হেডার্স ব্যবহার করে সেশন যাচাই
       const session = await auth.api.getSession({
         headers: {
           cookie: req.headers.cookie
@@ -171,7 +175,7 @@ async function run() {
     });
 
     app.post('/api/logout', async (req, res) => {
-      // Better Auth সেশন এবং নরমাল JWT উভয় কুকিই ক্লিয়ার করে দেওয়া
+      // Better Auth সেশন এবং নরমাল JWT উভয় কুকিই ক্লিয়ার করে দেওয়া
       res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none' });
       res.clearCookie('better-auth.session-token', { httpOnly: true, secure: true, sameSite: 'none' });
       res.send({ success: true });
