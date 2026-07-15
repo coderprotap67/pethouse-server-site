@@ -25,15 +25,7 @@ const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-const verifyToken = (req, res, next) => {
-  const token = req.cookies?.token;
-  if (!token) return res.status(401).send({ message: 'Unauthorized access' });
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(403).send({ message: 'Forbidden access' });
-    req.user = decoded;
-    next();
-  });
-};
+// Better Auth ইনস্ট্যান্স লোড করার ফাংশন
 let authInstance;
 const getAuthInstance = async () => {
   if (!authInstance) {
@@ -77,6 +69,54 @@ const getAuthInstance = async () => {
   return authInstance;
 };
 
+// ১০০% ফিক্সড ভেরিফিকেশন মিডলওয়্যার (JWT এবং Better Auth সেশন উভয়টি চেক করবে)
+const verifyToken = async (req, res, next) => {
+  // ১. প্রথমে আপনার নরমাল লগইনের JWT টোকেন চেক করবে
+  let token = req.cookies?.token;
+  
+  if (token) {
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+      if (err) return res.status(403).send({ message: 'Forbidden access' });
+      req.user = decoded;
+      return next();
+    });
+  } else {
+    // ২. যদি 'token' কুকি না থাকে, তবে Better Auth সেশন কুকি চেক করবে
+    const betterAuthToken = req.cookies?.["better-auth.session-token"];
+    
+    if (!betterAuthToken) {
+      return res.status(401).send({ message: 'Unauthorized access' });
+    }
+
+    try {
+      const auth = await getAuthInstance();
+      // রিকোয়েস্ট হেডার্স ব্যবহার করে সেশন যাচাই
+      const session = await auth.api.getSession({
+        headers: {
+          cookie: req.headers.cookie
+        }
+      });
+
+      if (!session || !session.user) {
+        return res.status(403).send({ message: 'Forbidden access: Invalid Better Auth Session' });
+      }
+
+      // custom user অবজেক্ট তৈরি করে req.user-এ অ্যাসাইন করা
+      req.user = {
+        name: session.user.name,
+        email: session.user.email,
+        photoURL: session.user.image
+      };
+      
+      next();
+    } catch (err) {
+      console.error("Session verification error:", err);
+      res.status(500).send({ message: 'Internal server error' });
+    }
+  }
+};
+
+// Better Auth রাউট হ্যান্ডলার
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -131,7 +171,10 @@ async function run() {
     });
 
     app.post('/api/logout', async (req, res) => {
-      res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none' }).send({ success: true });
+      // Better Auth সেশন এবং নরমাল JWT উভয় কুকিই ক্লিয়ার করে দেওয়া
+      res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none' });
+      res.clearCookie('better-auth.session-token', { httpOnly: true, secure: true, sameSite: 'none' });
+      res.send({ success: true });
     });
 
     app.get('/api/user-me', verifyToken, async (req, res) => {
