@@ -24,59 +24,46 @@ const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
+authInstance = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL,
 
-console.log("BETTER_AUTH_URL:", process.env.BETTER_AUTH_URL);
-console.log("FRONTEND_URL:", process.env.FRONTEND_URL);
-let authInstance;
-const getAuthInstance = async () => {
-  if (!authInstance) {
-    const { betterAuth } = await import("better-auth");
-    const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-    
-    await client.connect();
-    const db = client.db('pethouse');
+  database: mongodbAdapter(db),
 
-    authInstance = betterAuth({
-      database: mongodbAdapter(db), 
-      socialProviders: {
-        google: {
-          clientId: process.env.GOOGLE_CLIENT_ID,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-          mapQuery(req) {
-            return {
-              prompt: "select_account"
-            };
-          }
-        },
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      mapQuery() {
+        return {
+          prompt: "select_account",
+        };
       },
-      trustedOrigins: [
-        "https://pet-client-site.vercel.app", 
-        "http://localhost:3000"
-      ],
-      cookies: {
-        sessionToken: {
-          options: {
-            secure: true,
-            sameSite: "none",
-            httpOnly: true,
-          }
-        }
-      },
-      advanced: {
-        basePath: "/api/auth",
-        // ⬇️ এই ৩টি প্রক্সি ও ক্রস-ডোমেইন সেশন সেটিংস যোগ করা হয়েছে
-        useSecureCookies: true,
-        crossSubDomainCookie: true,
-        proxyImperativeHeaders: true
-      }
-    });
-  }
-  return authInstance;
-};
+    },
+  },
 
-// ১০০% ফিক্সড ভেরিফিকেশন মিডলওয়্যার (JWT এবং Better Auth সেশন উভয়টি চেক করবে)
+  trustedOrigins: [
+    process.env.FRONTEND_URL,
+    "http://localhost:3000",
+  ],
+
+  cookies: {
+    sessionToken: {
+      options: {
+        secure: true,
+        sameSite: "none",
+        httpOnly: true,
+      },
+    },
+  },
+
+  advanced: {
+    basePath: "/api/auth",
+    useSecureCookies: true,
+    crossSubDomainCookie: true,
+    proxyImperativeHeaders: true,
+  },
+});
 const verifyToken = async (req, res, next) => {
-  // ১. প্রথমে আপনার নরমাল লগইনের JWT টোকেন চেক করবে
   let token = req.cookies?.token;
   
   if (token) {
@@ -86,7 +73,6 @@ const verifyToken = async (req, res, next) => {
       return next();
     });
   } else {
-    // ২. যদি 'token' কুকি না থাকে, তবে Better Auth সেশন কুকি চেক করবে
     const betterAuthToken = req.cookies?.["better-auth.session-token"];
     
     if (!betterAuthToken) {
@@ -95,7 +81,6 @@ const verifyToken = async (req, res, next) => {
 
     try {
       const auth = await getAuthInstance();
-      // রিকোয়েস্ট হেডার্স ব্যবহার করে সেশন যাচাই
       const session = await auth.api.getSession({
         headers: {
           cookie: req.headers.cookie
@@ -105,8 +90,6 @@ const verifyToken = async (req, res, next) => {
       if (!session || !session.user) {
         return res.status(403).send({ message: 'Forbidden access: Invalid Better Auth Session' });
       }
-
-      // custom user অবজেক্ট তৈরি করে req.user-এ অ্যাসাইন করা
       req.user = {
         name: session.user.name,
         email: session.user.email,
@@ -120,8 +103,6 @@ const verifyToken = async (req, res, next) => {
     }
   }
 };
-
-// Better Auth রাউট হ্যান্ডলার
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
