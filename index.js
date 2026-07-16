@@ -25,7 +25,8 @@ const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-// Better Auth ইনস্ট্যান্স লোড করার ফাংশন
+console.log("BETTER_AUTH_URL:", process.env.BETTER_AUTH_URL);
+console.log("FRONTEND_URL:", process.env.FRONTEND_URL);
 let authInstance;
 const getAuthInstance = async () => {
   if (!authInstance) {
