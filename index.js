@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken'); 
-const { betterAuth } = require("better-auth");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config({ path: '.env' });
 
@@ -16,7 +15,6 @@ app.use(cors({
   origin: [frontendUrl, "http://localhost:3000"],
   credentials: true
 }));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -25,45 +23,54 @@ const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
-authInstance = betterAuth({
-  baseURL: process.env.BETTER_AUTH_URL,
+let authInstance = null;
 
-  database: mongodbAdapter(db),
+async function getAuthInstance() {
+  if (authInstance) return authInstance;
+  const { betterAuth } = await import("better-auth");
+  const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
+  
+  const database = client.db('pethouse');
 
-  socialProviders: {
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      mapQuery() {
-        return {
-          prompt: "select_account",
-        };
+  authInstance = betterAuth({
+    baseURL: process.env.BETTER_AUTH_URL,
+    database: mongodbAdapter(database), 
+    socialProviders: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        mapQuery() {
+          return {
+            prompt: "select_account",
+          };
+        },
       },
     },
-  },
-
-  trustedOrigins: [
-    process.env.FRONTEND_URL,
-    "http://localhost:3000",
-  ],
-
-  cookies: {
-    sessionToken: {
-      options: {
-        secure: true,
-        sameSite: "none",
-        httpOnly: true,
+    trustedOrigins: [
+      process.env.FRONTEND_URL,
+      "http://localhost:3000",
+    ],
+    cookies: {
+      sessionToken: {
+        options: {
+          secure: true,
+          sameSite: "none",
+          httpOnly: true,
+        },
       },
     },
-  },
+    advanced: {
+      basePath: "/api/auth",
+      useSecureCookies: true,
+      crossSubDomainCookie: true,
+      proxyImperativeHeaders: true,
+    },
+  });
 
-  advanced: {
-    basePath: "/api/auth",
-    useSecureCookies: true,
-    crossSubDomainCookie: true,
-    proxyImperativeHeaders: true,
-  },
-});
+  return authInstance;
+}
+
+// ভেরিফাই টোকেন মিডলওয়্যার
 const verifyToken = async (req, res, next) => {
   let token = req.cookies?.token;
   
@@ -104,6 +111,8 @@ const verifyToken = async (req, res, next) => {
     }
   }
 };
+
+// Better Auth রাউট হ্যান্ডলার
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -158,7 +167,6 @@ async function run() {
     });
 
     app.post('/api/logout', async (req, res) => {
-      // Better Auth সেশন এবং নরমাল JWT উভয় কুকিই ক্লিয়ার করে দেওয়া
       res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none' });
       res.clearCookie('better-auth.session-token', { httpOnly: true, secure: true, sameSite: 'none' });
       res.send({ success: true });
