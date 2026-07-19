@@ -15,6 +15,7 @@ app.use(cors({
   origin: [frontendUrl, "http://localhost:3000"],
   credentials: true
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -23,10 +24,12 @@ const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
+
 let authInstance = null;
 
 async function getAuthInstance() {
   if (authInstance) return authInstance;
+
   const { betterAuth } = await import("better-auth");
   const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
   
@@ -52,6 +55,14 @@ async function getAuthInstance() {
     ],
     cookies: {
       sessionToken: {
+        options: {
+          secure: true,
+          sameSite: "none",
+          httpOnly: true,
+        },
+      },
+      // Cross-Origin state mismatch ফিক্স করার জন্য নতুন কুকি সেটিংস
+      state: {
         options: {
           secure: true,
           sameSite: "none",
