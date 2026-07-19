@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken'); 
+const { betterAuth } = require("better-auth");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config({ path: '.env' });
 
@@ -10,7 +11,7 @@ const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
 
-const frontendUrl = process.env.FRONTEND_URL || "https://pet-client-site.vercel.app";
+const frontendUrl = process.env.FRONTEND_URL || "https://pethouse-client-site.vercel.app";
 app.use(cors({
   origin: [frontendUrl, "http://localhost:3000"],
   credentials: true
