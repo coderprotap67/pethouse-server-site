@@ -9,10 +9,18 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
+const cleanUrl = (url) => url ? url.replace(/\/$/, "") : "";
 
-const frontendUrl = process.env.FRONTEND_URL || "https://pethouse-client-site.vercel.app";
+const clientFrontendUrl = cleanUrl(process.env.FRONTEND_URL) || "https://pethouse-client-site.vercel.app";
+const serverBaseUrl = cleanUrl(process.env.BETTER_AUTH_URL) || "https://pethouse-server-site.vercel.app";
+const allowedOrigins = [
+  clientFrontendUrl,
+  "https://pethouse-client-site.vercel.app",
+  "http://localhost:3000"
+].filter((url, index, self) => url && self.indexOf(url) === index);
+
 app.use(cors({
-  origin: [frontendUrl, "http://localhost:3000"],
+  origin: allowedOrigins,
   credentials: true
 }));
 
@@ -36,7 +44,7 @@ async function getAuthInstance() {
   const database = client.db('pethouse');
 
   authInstance = betterAuth({
-    baseURL: process.env.BETTER_AUTH_URL,
+    baseURL: serverBaseUrl,
     database: mongodbAdapter(database), 
     socialProviders: {
       google: {
@@ -49,10 +57,7 @@ async function getAuthInstance() {
         },
       },
     },
-    trustedOrigins: [
-      process.env.FRONTEND_URL,
-      "http://localhost:3000",
-    ],
+    trustedOrigins: allowedOrigins,
     cookies: {
       sessionToken: {
         options: {
@@ -61,7 +66,6 @@ async function getAuthInstance() {
           httpOnly: true,
         },
       },
-      // Cross-Origin state mismatch ফিক্স করার জন্য নতুন কুকি সেটিংস
       state: {
         options: {
           secure: true,
@@ -80,8 +84,6 @@ async function getAuthInstance() {
 
   return authInstance;
 }
-
-// ভেরিফাই টোকেন মিডলওয়্যার
 const verifyToken = async (req, res, next) => {
   let token = req.cookies?.token;
   
@@ -122,8 +124,6 @@ const verifyToken = async (req, res, next) => {
     }
   }
 };
-
-// Better Auth রাউট হ্যান্ডলার
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
