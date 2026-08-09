@@ -7,23 +7,30 @@ require('dotenv').config({ path: '.env' });
 
 const app = express();
 const port = process.env.PORT || 5000;
-
 app.set('trust proxy', 1);
-const cleanUrl = (url) => url ? url.replace(/\/$/, "") : "";
-
+const cleanUrl = (url) => (url ? url.replace(/\/$/, "") : "");
 const clientFrontendUrl = cleanUrl(process.env.FRONTEND_URL) || "https://pethouse-client-site.vercel.app";
-const serverBaseUrl = cleanUrl(process.env.BETTER_AUTH_URL) || "https://pethouse-server-site.vercel.app";
+const serverBaseUrl = cleanUrl(process.env.BETTER_AUTH_URL) || "https://pet-server-site.vercel.app";
 const allowedOrigins = [
   clientFrontendUrl,
   "https://pethouse-client-site.vercel.app",
+  "https://pet-server-site.vercel.app",
   "http://localhost:3000"
 ].filter((url, index, self) => url && self.indexOf(url) === index);
 
 app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS Not Allowed'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With']
 }));
-
+app.options('*', cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -36,12 +43,9 @@ const database = client.db('pethouse');
 const petsCollection = database.collection('data');
 const requestsCollection = database.collection('requests');
 const usersCollection = database.collection('users');
-
 let authInstance = null;
-
 async function getAuthInstance() {
   if (authInstance) return authInstance;
-
   const { betterAuth } = await import("better-auth");
   const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
 
@@ -86,7 +90,6 @@ async function getAuthInstance() {
 
   return authInstance;
 }
-
 const verifyToken = async (req, res, next) => {
   let token = req.cookies?.token;
   
@@ -127,6 +130,7 @@ const verifyToken = async (req, res, next) => {
     }
   }
 };
+app.get('/', (req, res) => res.send('Pet adoption server running...'));
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -138,7 +142,6 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.send('Pet adoption server running...'));
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -289,6 +292,7 @@ app.put('/api/update-profile', verifyToken, async (req, res) => {
 });
 
 module.exports = app;
+
 if (process.env.NODE_ENV !== 'production') {
   app.listen(port, () => console.log(`Server listening on port ${port}`));
 }
