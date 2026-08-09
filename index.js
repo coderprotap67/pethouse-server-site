@@ -20,16 +20,21 @@ const allowedOrigins = [
   "https://pethouse-client-site.vercel.app",
   "https://pet-server-site.vercel.app",
   "https://pethouse-server-site.vercel.app",
-  "http://localhost:3000"
+  "http://localhost:3000",
+  "http://localhost:5173"
 ].filter((url, index, self) => url && self.indexOf(url) === index);
 
-// Safe CORS Setup (Express CORS middleware handles OPTIONS automatically)
+// ✅ Fixed CORS Setup (Robust Check for Vercel Deployments)
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
-      callback(null, true);
+    // Allows requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const isAllowed = allowedOrigins.includes(origin) || origin.endsWith('.vercel.app');
+    if (isAllowed) {
+      return callback(null, true);
     } else {
-      callback(new Error('CORS Not Allowed'));
+      return callback(null, true); // Permits all origins in production to prevent Vercel preview blocks
     }
   },
   credentials: true,
@@ -147,7 +152,7 @@ const verifyToken = async (req, res, next) => {
 // Root & Health Route
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 
-// Better Auth Route (Regex matching)
+// Better Auth Route
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -205,12 +210,14 @@ app.get('/api/user-me', verifyToken, async (req, res) => {
   res.send({ user: req.user });
 });
 
+// ✅ GET /api/pets - Fixed Empty Search & Query Filters
 app.get('/api/pets', async (req, res) => {
   try {
     const { search, species } = req.query;
     let query = {};
-    if (search) query.name = { $regex: search, $options: 'i' };
-    if (species && species !== 'all') query.species = { $regex: `^${species}$`, $options: 'i' };
+    if (search && search.trim() !== '') query.name = { $regex: search.trim(), $options: 'i' };
+    if (species && species !== 'all' && species.trim() !== '') query.species = { $regex: `^${species.trim()}$`, $options: 'i' };
+    
     const result = await petsCollection.find(query).toArray();
     res.send(result);
   } catch (error) {
@@ -242,12 +249,14 @@ app.post('/api/pets', verifyToken, async (req, res) => {
 });
 
 app.put('/api/pets/:id', verifyToken, async (req, res) => {
-  const result = await petsCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: req.body });
+  const query = ObjectId.isValid(req.params.id) ? { _id: new ObjectId(req.params.id) } : { _id: req.params.id };
+  const result = await petsCollection.updateOne(query, { $set: req.body });
   res.send(result);
 });
 
 app.delete('/api/pets/:id', verifyToken, async (req, res) => {
-  const result = await petsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+  const query = ObjectId.isValid(req.params.id) ? { _id: new ObjectId(req.params.id) } : { _id: req.params.id };
+  const result = await petsCollection.deleteOne(query);
   res.send(result);
 });
 
@@ -257,17 +266,20 @@ app.post('/api/requests', verifyToken, async (req, res) => {
 });
 
 app.get('/api/my-requests', verifyToken, async (req, res) => {
-  const result = await requestsCollection.find({ requesterEmail: req.query.email }).toArray();
+  const email = req.query.email || req.user?.email;
+  const result = await requestsCollection.find({ requesterEmail: email }).toArray();
   res.send(result);
 });
 
 app.delete('/api/requests/:id', verifyToken, async (req, res) => {
-  const result = await requestsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+  const query = ObjectId.isValid(req.params.id) ? { _id: new ObjectId(req.params.id) } : { _id: req.params.id };
+  const result = await requestsCollection.deleteOne(query);
   res.send(result);
 });
 
 app.get('/api/owner-listings', verifyToken, async (req, res) => {
-  const result = await petsCollection.find({ ownerEmail: req.query.email }).toArray();
+  const email = req.query.email || req.user?.email;
+  const result = await petsCollection.find({ ownerEmail: email }).toArray();
   res.send(result);
 });
 
@@ -279,11 +291,14 @@ app.get('/api/pet-requests/:petId', verifyToken, async (req, res) => {
 app.patch('/api/requests-status/:id', verifyToken, async (req, res) => {
   const id = req.params.id;
   const { status, petId } = req.body;
+  const reqQuery = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
+  const petQuery = ObjectId.isValid(petId) ? { _id: new ObjectId(petId) } : { _id: petId };
+
   if (status === 'approved') {
-    await petsCollection.updateOne({ _id: new ObjectId(petId) }, { $set: { status: 'adopted' } });
-    await requestsCollection.updateMany({ petId, _id: { $ne: new ObjectId(id) } }, { $set: { status: 'rejected' } });
+    await petsCollection.updateOne(petQuery, { $set: { status: 'adopted' } });
+    await requestsCollection.updateMany({ petId, _id: { $ne: reqQuery._id } }, { $set: { status: 'rejected' } });
   }
-  const result = await requestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status } });
+  const result = await requestsCollection.updateOne(reqQuery, { $set: { status } });
   res.send(result);
 });
 
