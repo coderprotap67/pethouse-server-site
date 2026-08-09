@@ -23,11 +23,8 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173"
 ].filter((url, index, self) => url && self.indexOf(url) === index);
-
-// ✅ Fixed CORS Setup (Robust Check for Vercel Deployments)
 app.use(cors({
   origin: function (origin, callback) {
-    // Allows requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
     const isAllowed = allowedOrigins.includes(origin) || origin.endsWith('.vercel.app');
@@ -45,8 +42,6 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
-// MongoDB Database Setup
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
@@ -106,8 +101,6 @@ async function getAuthInstance() {
 
   return authInstance;
 }
-
-// Token Verification Middleware
 const verifyToken = async (req, res, next) => {
   let token = req.cookies?.token;
   
@@ -149,10 +142,7 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// Root & Health Route
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
-
-// Better Auth Route
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -209,8 +199,6 @@ app.post('/api/logout', async (req, res) => {
 app.get('/api/user-me', verifyToken, async (req, res) => {
   res.send({ user: req.user });
 });
-
-// ✅ GET /api/pets - Fixed Empty Search & Query Filters
 app.get('/api/pets', async (req, res) => {
   try {
     const { search, species } = req.query;
@@ -323,8 +311,6 @@ app.put('/api/update-profile', verifyToken, async (req, res) => {
     res.status(500).send({ success: false, message: error.message });
   }
 });
-
-// Vercel Serverless Export
 module.exports = app;
 
 if (process.env.NODE_ENV !== 'production') {
