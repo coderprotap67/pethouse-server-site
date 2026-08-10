@@ -13,7 +13,7 @@ app.set('trust proxy', 1);
 const cleanUrl = (url) => (url ? url.replace(/\/$/, "") : "");
 
 const clientFrontendUrl = cleanUrl(process.env.FRONTEND_URL) || "https://pethouse-client-site.vercel.app";
-const serverBaseUrl = cleanUrl(process.env.BETTER_AUTH_URL) || "https://pet-server-site.vercel.app";
+const serverBaseUrl = cleanUrl(process.env.BETTER_AUTH_URL) || "https://pethouse-server-site.vercel.app";
 
 const allowedOrigins = [
   clientFrontendUrl,
@@ -23,6 +23,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173"
 ].filter((url, index, self) => url && self.indexOf(url) === index);
+
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
@@ -31,7 +32,7 @@ app.use(cors({
     if (isAllowed) {
       return callback(null, true);
     } else {
-      return callback(null, true); // Permits all origins in production to prevent Vercel preview blocks
+      return callback(null, true);
     }
   },
   credentials: true,
@@ -42,6 +43,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
@@ -102,47 +104,46 @@ async function getAuthInstance() {
   return authInstance;
 }
 const verifyToken = async (req, res, next) => {
-  let token = req.cookies?.token;
-  
+  const authHeader = req.headers.authorization;
+  let token = null;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else {
+    token = req.cookies?.token;
+  }
   if (token) {
-    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-      if (err) return res.status(403).send({ message: 'Forbidden access' });
+    return jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+      if (err) {
+        return res.status(403).send({ message: 'Forbidden access: Invalid JWT' });
+      }
       req.user = decoded;
       return next();
     });
-  } else {
-    const betterAuthToken = req.cookies?.["better-auth.session-token"];
-    
-    if (!betterAuthToken) {
-      return res.status(401).send({ message: 'Unauthorized access' });
-    }
+  }
+  try {
+    const auth = await getAuthInstance();
+    const session = await auth.api.getSession({
+      headers: req.headers
+    });
 
-    try {
-      const auth = await getAuthInstance();
-      const session = await auth.api.getSession({
-        headers: {
-          cookie: req.headers.cookie
-        }
-      });
-
-      if (!session || !session.user) {
-        return res.status(403).send({ message: 'Forbidden access: Invalid Better Auth Session' });
-      }
+    if (session && session.user) {
       req.user = {
         name: session.user.name,
         email: session.user.email,
         photoURL: session.user.image
       };
-      
-      next();
-    } catch (err) {
-      console.error("Session verification error:", err);
-      res.status(500).send({ message: 'Internal server error' });
+      return next();
     }
+  } catch (err) {
+    console.error("Better Auth session verification error:", err);
   }
+
+  return res.status(401).send({ message: 'Unauthorized access' });
 };
 
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
+
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -153,8 +154,6 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
     res.status(500).send({ error: err.message });
   }
 });
-
-// All API Routes
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -193,25 +192,27 @@ app.post('/api/jwt', async (req, res) => {
 app.post('/api/logout', async (req, res) => {
   res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none' });
   res.clearCookie('better-auth.session-token', { httpOnly: true, secure: true, sameSite: 'none' });
+  res.clearCookie('better-auth.session_token', { httpOnly: true, secure: true, sameSite: 'none' });
   res.send({ success: true });
 });
 
 app.get('/api/user-me', verifyToken, async (req, res) => {
   res.send({ user: req.user });
 });
+
 app.get(['/api/pets', '/pets'], async (req, res) => {
   try {
     const { search, species } = req.query;
     let query = {};
     if (search && search.trim() !== '') query.name = { $regex: search.trim(), $options: 'i' };
     if (species && species !== 'all' && species.trim() !== '') query.species = { $regex: `^${species.trim()}$`, $options: 'i' };
-    
     const result = await petsCollection.find(query).toArray();
     res.send(result);
   } catch (error) {
     res.status(500).send({ message: error.message });
   }
 });
+
 app.get(['/api/pets/:id', '/pets/:id'], async (req, res) => {
   try {
     const id = req.params.id;
@@ -221,7 +222,6 @@ app.get(['/api/pets/:id', '/pets/:id'], async (req, res) => {
         ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])
       ]
     };
-
     const result = await petsCollection.findOne(query);
     if (!result) return res.status(404).send({ message: 'Pet not found' });
     res.send(result);
@@ -246,10 +246,18 @@ app.delete('/api/pets/:id', verifyToken, async (req, res) => {
   const result = await petsCollection.deleteOne(query);
   res.send(result);
 });
-
 app.post('/api/requests', verifyToken, async (req, res) => {
-  const result = await requestsCollection.insertOne(req.body);
-  res.send(result);
+  try {
+    const requestData = {
+      ...req.body,
+      requesterEmail: req.user?.email || req.body.requesterEmail,
+      createdAt: new Date()
+    };
+    const result = await requestsCollection.insertOne(requestData);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: error.message });
+  }
 });
 
 app.get('/api/my-requests', verifyToken, async (req, res) => {
@@ -310,6 +318,7 @@ app.put('/api/update-profile', verifyToken, async (req, res) => {
     res.status(500).send({ success: false, message: error.message });
   }
 });
+
 module.exports = app;
 
 if (process.env.NODE_ENV !== 'production') {
