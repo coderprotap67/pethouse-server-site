@@ -103,24 +103,32 @@ async function getAuthInstance() {
 
   return authInstance;
 }
+
+// 🔒 Hybrid Token Verification Middleware (JWT + Better Auth Google Session)
 const verifyToken = async (req, res, next) => {
+  // 1. Check Bearer Token in Authorization Header
   const authHeader = req.headers.authorization;
   let token = null;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
   } else {
+    // 2. Fallback to JWT Cookie
     token = req.cookies?.token;
   }
-  if (token) {
-    return jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-      if (err) {
-        return res.status(403).send({ message: 'Forbidden access: Invalid JWT' });
-      }
+
+  // Verify Custom JWT Token if present
+  if (token && token !== 'undefined' && token !== 'null') {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = decoded;
       return next();
-    });
+    } catch (err) {
+      // If JWT verification fails, proceed to check Better Auth session
+    }
   }
+
+  // 3. Fallback to Better Auth Session Verification (for Google Login)
   try {
     const auth = await getAuthInstance();
     const session = await auth.api.getSession({
@@ -131,7 +139,8 @@ const verifyToken = async (req, res, next) => {
       req.user = {
         name: session.user.name,
         email: session.user.email,
-        photoURL: session.user.image
+        photoURL: session.user.image,
+        id: session.user.id
       };
       return next();
     }
@@ -144,6 +153,7 @@ const verifyToken = async (req, res, next) => {
 
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 
+// Better Auth Endpoint Handler
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -154,6 +164,8 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
     res.status(500).send({ error: err.message });
   }
 });
+
+// Authentication Routes
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -162,7 +174,11 @@ app.post('/api/register', async (req, res) => {
     if (existingUser) return res.status(400).send({ success: false, message: 'User already exists!' });
     const newUser = { name, email, password };
     const result = await usersCollection.insertOne(newUser);
-    res.send({ success: true, message: 'User registered successfully!', result });
+    
+    // Auto-generate JWT token on register
+    const token = jwt.sign({ name, email }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
+       .send({ success: true, message: 'User registered successfully!', token, user: { name, email }, result });
   } catch (error) {
     res.status(500).send({ success: false, message: error.message });
   }
@@ -176,8 +192,10 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).send({ success: false, message: 'Invalid credentials' });
     }
     const token = jwt.sign({ name: user.name, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    
+    // Send token in JSON response body as well as Cookie
     res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
-      .send({ success: true, user: { name: user.name, email: user.email } });
+      .send({ success: true, token, user: { name: user.name, email: user.email } });
   } catch (error) {
     res.status(500).send({ success: false, message: error.message });
   }
@@ -186,7 +204,8 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/jwt', async (req, res) => {
   const user = req.body;
   const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
-  res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 }).send({ success: true });
+  res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
+     .send({ success: true, token });
 });
 
 app.post('/api/logout', async (req, res) => {
@@ -200,12 +219,14 @@ app.get('/api/user-me', verifyToken, async (req, res) => {
   res.send({ user: req.user });
 });
 
+// Pets API Routes
 app.get(['/api/pets', '/pets'], async (req, res) => {
   try {
     const { search, species } = req.query;
     let query = {};
     if (search && search.trim() !== '') query.name = { $regex: search.trim(), $options: 'i' };
     if (species && species !== 'all' && species.trim() !== '') query.species = { $regex: `^${species.trim()}$`, $options: 'i' };
+    
     const result = await petsCollection.find(query).toArray();
     res.send(result);
   } catch (error) {
@@ -222,6 +243,7 @@ app.get(['/api/pets/:id', '/pets/:id'], async (req, res) => {
         ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])
       ]
     };
+
     const result = await petsCollection.findOne(query);
     if (!result) return res.status(404).send({ message: 'Pet not found' });
     res.send(result);
@@ -246,6 +268,8 @@ app.delete('/api/pets/:id', verifyToken, async (req, res) => {
   const result = await petsCollection.deleteOne(query);
   res.send(result);
 });
+
+// Adoption Requests API Routes
 app.post('/api/requests', verifyToken, async (req, res) => {
   try {
     const requestData = {
@@ -267,7 +291,7 @@ app.get('/api/my-requests', verifyToken, async (req, res) => {
 });
 
 app.delete('/api/requests/:id', verifyToken, async (req, res) => {
-  const query = ObjectId.isValid(req.params.id) ? { _id: new ObjectId(req.params.id) } : { _id: req.params.id };
+  const query = ObjectId.isValid(req.params.id) ? { _id: new ObjectId(req.params.id) } : { _id: id };
   const result = await requestsCollection.deleteOne(query);
   res.send(result);
 });
