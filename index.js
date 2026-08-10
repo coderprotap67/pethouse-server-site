@@ -199,7 +199,7 @@ app.post('/api/logout', async (req, res) => {
 app.get('/api/user-me', verifyToken, async (req, res) => {
   res.send({ user: req.user });
 });
-app.get('/api/pets', async (req, res) => {
+app.get(['/api/pets', '/pets'], async (req, res) => {
   try {
     const { search, species } = req.query;
     let query = {};
@@ -212,8 +212,7 @@ app.get('/api/pets', async (req, res) => {
     res.status(500).send({ message: error.message });
   }
 });
-
-app.get('/api/pets/:id', async (req, res) => {
+app.get(['/api/pets/:id', '/pets/:id'], async (req, res) => {
   try {
     const id = req.params.id;
     const query = {
