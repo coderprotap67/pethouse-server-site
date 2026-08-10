@@ -9,12 +9,9 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.set('trust proxy', 1);
-
 const cleanUrl = (url) => (url ? url.replace(/\/$/, "") : "");
-
 const clientFrontendUrl = cleanUrl(process.env.FRONTEND_URL) || "https://pethouse-client-site.vercel.app";
 const serverBaseUrl = cleanUrl(process.env.BETTER_AUTH_URL) || "https://pethouse-server-site.vercel.app";
-
 const allowedOrigins = [
   clientFrontendUrl,
   "https://pethouse-client-site.vercel.app",
@@ -23,7 +20,6 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173"
 ].filter((url, index, self) => url && self.indexOf(url) === index);
-
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
@@ -38,11 +34,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With']
 }));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
@@ -52,15 +46,11 @@ const database = client.db('pethouse');
 const petsCollection = database.collection('data');
 const requestsCollection = database.collection('requests');
 const usersCollection = database.collection('users');
-
 let authInstance = null;
-
 async function getAuthInstance() {
   if (authInstance) return authInstance;
-
   const { betterAuth } = await import("better-auth");
   const { mongodbAdapter } = await import("better-auth/adapters/mongodb");
-
   authInstance = betterAuth({
     baseURL: serverBaseUrl,
     database: mongodbAdapter(database), 
@@ -84,8 +74,6 @@ async function getAuthInstance() {
 
   return authInstance;
 }
-
-// 🔒 Robust Cross-Domain Token Verification
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   let token = null;
@@ -95,25 +83,20 @@ const verifyToken = async (req, res, next) => {
   } else {
     token = req.cookies?.token;
   }
-
-  // 1. Verify Custom JWT Bearer Token
   if (token && token !== 'undefined' && token !== 'null') {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = decoded;
       return next();
     } catch (err) {
-      // JWT Failed, proceed to session check
     }
   }
 
-  // 2. Fallback to Better Auth Session Check
   try {
     const auth = await getAuthInstance();
     const session = await auth.api.getSession({
       headers: req.headers
     });
-
     if (session && session.user) {
       req.user = {
         name: session.user.name,
@@ -125,12 +108,9 @@ const verifyToken = async (req, res, next) => {
   } catch (err) {
     console.error("Better Auth verification error:", err);
   }
-
   return res.status(401).send({ message: 'Unauthorized access' });
 };
-
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
-
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -142,7 +122,6 @@ app.all(/^\/api\/auth\/.*/, async (req, res) => {
   }
 });
 
-// Authentication Routes
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -173,8 +152,6 @@ app.post('/api/login', async (req, res) => {
     res.status(500).send({ success: false, message: error.message });
   }
 });
-
-// Generates JWT Token for Google/Better Auth users
 app.post('/api/jwt', async (req, res) => {
   try {
     const user = req.body;
@@ -242,8 +219,6 @@ app.delete('/api/pets/:id', verifyToken, async (req, res) => {
   const result = await petsCollection.deleteOne(query);
   res.send(result);
 });
-
-// Adoption Requests API Routes
 app.post('/api/requests', verifyToken, async (req, res) => {
   try {
     const requestData = {
@@ -296,7 +271,7 @@ app.patch('/api/requests-status/:id', verifyToken, async (req, res) => {
   res.send(result);
 });
 
-module.exports = app;
+module.exports = app
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(port, () => console.log(`Server listening on port ${port}`));
