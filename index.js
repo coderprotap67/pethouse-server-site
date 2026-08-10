@@ -27,7 +27,6 @@ const allowedOrigins = [
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    
     const isAllowed = allowedOrigins.includes(origin) || origin.endsWith('.vercel.app');
     if (isAllowed) {
       return callback(null, true);
@@ -70,29 +69,11 @@ async function getAuthInstance() {
         clientId: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         mapQuery() {
-          return {
-            prompt: "select_account",
-          };
+          return { prompt: "select_account" };
         },
       },
     },
     trustedOrigins: allowedOrigins,
-    cookies: {
-      sessionToken: {
-        options: {
-          secure: true,
-          sameSite: "none",
-          httpOnly: true,
-        },
-      },
-      state: {
-        options: {
-          secure: true,
-          sameSite: "none",
-          httpOnly: true,
-        },
-      },
-    },
     advanced: {
       basePath: "/api/auth",
       useSecureCookies: true,
@@ -104,31 +85,29 @@ async function getAuthInstance() {
   return authInstance;
 }
 
-// 🔒 Hybrid Token Verification Middleware (JWT + Better Auth Google Session)
+// 🔒 Robust Cross-Domain Token Verification
 const verifyToken = async (req, res, next) => {
-  // 1. Check Bearer Token in Authorization Header
   const authHeader = req.headers.authorization;
   let token = null;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
     token = authHeader.split(' ')[1];
   } else {
-    // 2. Fallback to JWT Cookie
     token = req.cookies?.token;
   }
 
-  // Verify Custom JWT Token if present
+  // 1. Verify Custom JWT Bearer Token
   if (token && token !== 'undefined' && token !== 'null') {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = decoded;
       return next();
     } catch (err) {
-      // If JWT verification fails, proceed to check Better Auth session
+      // JWT Failed, proceed to session check
     }
   }
 
-  // 3. Fallback to Better Auth Session Verification (for Google Login)
+  // 2. Fallback to Better Auth Session Check
   try {
     const auth = await getAuthInstance();
     const session = await auth.api.getSession({
@@ -140,12 +119,11 @@ const verifyToken = async (req, res, next) => {
         name: session.user.name,
         email: session.user.email,
         photoURL: session.user.image,
-        id: session.user.id
       };
       return next();
     }
   } catch (err) {
-    console.error("Better Auth session verification error:", err);
+    console.error("Better Auth verification error:", err);
   }
 
   return res.status(401).send({ message: 'Unauthorized access' });
@@ -153,7 +131,6 @@ const verifyToken = async (req, res, next) => {
 
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
 
-// Better Auth Endpoint Handler
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -172,13 +149,12 @@ app.post('/api/register', async (req, res) => {
     if (!email || !password) return res.status(400).send({ success: false, message: 'Email and password are required!' });
     const existingUser = await usersCollection.findOne({ email });
     if (existingUser) return res.status(400).send({ success: false, message: 'User already exists!' });
-    const newUser = { name, email, password };
-    const result = await usersCollection.insertOne(newUser);
     
-    // Auto-generate JWT token on register
-    const token = jwt.sign({ name, email }, process.env.JWT_SECRET, { expiresIn: '1d' });
-    res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
-       .send({ success: true, message: 'User registered successfully!', token, user: { name, email }, result });
+    const newUser = { name, email, password };
+    await usersCollection.insertOne(newUser);
+    
+    const token = jwt.sign({ name, email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.send({ success: true, message: 'User registered successfully!', token, user: { name, email } });
   } catch (error) {
     res.status(500).send({ success: false, message: error.message });
   }
@@ -191,27 +167,26 @@ app.post('/api/login', async (req, res) => {
     if (!user || user.password?.trim() !== password?.trim()) {
       return res.status(401).send({ success: false, message: 'Invalid credentials' });
     }
-    const token = jwt.sign({ name: user.name, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1d' });
-    
-    // Send token in JSON response body as well as Cookie
-    res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
-      .send({ success: true, token, user: { name: user.name, email: user.email } });
+    const token = jwt.sign({ name: user.name, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.send({ success: true, token, user: { name: user.name, email: user.email } });
   } catch (error) {
     res.status(500).send({ success: false, message: error.message });
   }
 });
 
+// Generates JWT Token for Google/Better Auth users
 app.post('/api/jwt', async (req, res) => {
-  const user = req.body;
-  const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
-  res.cookie('token', token, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 24 * 60 * 60 * 1000 })
-     .send({ success: true, token });
+  try {
+    const user = req.body;
+    if (!user?.email) return res.status(400).send({ message: "Email required" });
+    const token = jwt.sign({ name: user.name, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.send({ success: true, token });
+  } catch (err) {
+    res.status(500).send({ message: err.message });
+  }
 });
 
 app.post('/api/logout', async (req, res) => {
-  res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none' });
-  res.clearCookie('better-auth.session-token', { httpOnly: true, secure: true, sameSite: 'none' });
-  res.clearCookie('better-auth.session_token', { httpOnly: true, secure: true, sameSite: 'none' });
   res.send({ success: true });
 });
 
@@ -243,7 +218,6 @@ app.get(['/api/pets/:id', '/pets/:id'], async (req, res) => {
         ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : [])
       ]
     };
-
     const result = await petsCollection.findOne(query);
     if (!result) return res.status(404).send({ message: 'Pet not found' });
     res.send(result);
@@ -291,7 +265,8 @@ app.get('/api/my-requests', verifyToken, async (req, res) => {
 });
 
 app.delete('/api/requests/:id', verifyToken, async (req, res) => {
-  const query = ObjectId.isValid(req.params.id) ? { _id: new ObjectId(req.params.id) } : { _id: id };
+  const id = req.params.id;
+  const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
   const result = await requestsCollection.deleteOne(query);
   res.send(result);
 });
@@ -319,28 +294,6 @@ app.patch('/api/requests-status/:id', verifyToken, async (req, res) => {
   }
   const result = await requestsCollection.updateOne(reqQuery, { $set: { status } });
   res.send(result);
-});
-
-app.put('/api/update-profile', verifyToken, async (req, res) => {
-  try {
-    const { name, photoURL, currentPassword, newPassword } = req.body;
-    const email = req.user.email; 
-    const user = await usersCollection.findOne({ email });
-    if (!user) return res.status(404).send({ success: false, message: 'User not found' });
-    
-    let updatedData = { name, photoURL };
-    if (currentPassword && newPassword) {
-      if (user.authProvider === 'google') return res.status(400).send({ success: false, message: 'Google users cannot change password.' });
-      if (user.password?.trim() !== currentPassword?.trim()) return res.status(400).send({ success: false, message: 'Current password is incorrect.' });
-      if (newPassword.length < 6) return res.status(400).send({ success: false, message: 'New password must be at least 6 characters.' });
-      updatedData.password = newPassword; 
-    }
-    await usersCollection.updateOne({ email }, { $set: updatedData });
-    const updatedUser = await usersCollection.findOne({ email }); 
-    res.send({ success: true, user: { name: updatedUser.name, email: updatedUser.email, photoURL: updatedUser.photoURL } });
-  } catch (error) {
-    res.status(500).send({ success: false, message: error.message });
-  }
 });
 
 module.exports = app;
