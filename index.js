@@ -20,6 +20,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5173"
 ].filter((url, index, self) => url && self.indexOf(url) === index);
+
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
@@ -34,9 +35,11 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With']
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
@@ -46,6 +49,7 @@ const database = client.db('pethouse');
 const petsCollection = database.collection('data');
 const requestsCollection = database.collection('requests');
 const usersCollection = database.collection('users');
+
 let authInstance = null;
 async function getAuthInstance() {
   if (authInstance) return authInstance;
@@ -74,6 +78,7 @@ async function getAuthInstance() {
 
   return authInstance;
 }
+
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   let token = null;
@@ -110,7 +115,9 @@ const verifyToken = async (req, res, next) => {
   }
   return res.status(401).send({ message: 'Unauthorized access' });
 };
+
 app.get('/', (req, res) => res.send('Pet adoption server running...'));
+
 app.all(/^\/api\/auth\/.*/, async (req, res) => {
   try {
     const { toNodeHandler } = await import("better-auth/node");
@@ -152,6 +159,7 @@ app.post('/api/login', async (req, res) => {
     res.status(500).send({ success: false, message: error.message });
   }
 });
+
 app.post('/api/jwt', async (req, res) => {
   try {
     const user = req.body;
@@ -171,8 +179,7 @@ app.get('/api/user-me', verifyToken, async (req, res) => {
   res.send({ user: req.user });
 });
 
-// Pets API Routes
-app.get(['/api/pets', '/pets'], async (req, res) => {
+app.get(['/api/pets', '/pets'], verifyToken, async (req, res) => {
   try {
     const { search, species } = req.query;
     let query = {};
@@ -186,7 +193,7 @@ app.get(['/api/pets', '/pets'], async (req, res) => {
   }
 });
 
-app.get(['/api/pets/:id', '/pets/:id'], async (req, res) => {
+app.get(['/api/pets/:id', '/pets/:id'], verifyToken, async (req, res) => {
   try {
     const id = req.params.id;
     const query = {
@@ -219,6 +226,7 @@ app.delete('/api/pets/:id', verifyToken, async (req, res) => {
   const result = await petsCollection.deleteOne(query);
   res.send(result);
 });
+
 app.post('/api/requests', verifyToken, async (req, res) => {
   try {
     const requestData = {
@@ -271,7 +279,7 @@ app.patch('/api/requests-status/:id', verifyToken, async (req, res) => {
   res.send(result);
 });
 
-module.exports = app
+module.exports = app;
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(port, () => console.log(`Server listening on port ${port}`));
